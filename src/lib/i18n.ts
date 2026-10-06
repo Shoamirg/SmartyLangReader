@@ -30,6 +30,13 @@ type Strings = {
   errUnavailable: string;
   errStart: string;
   best: string;
+  errNetwork: string;
+  errLanguage: string;
+  errNoSpeech: string;
+  errOther: string;
+  stReady: string;
+  stSpeech: string;
+  stProcessing: string;
 };
 
 export const STRINGS: Record<Lang, Strings> = {
@@ -60,6 +67,13 @@ export const STRINGS: Record<Lang, Strings> = {
     errUnavailable: 'Bu qurilmada nutqni tanish mavjud emas (Google ilovasini oʻrnating).',
     errStart: 'Tinglashni boshlab boʻlmadi. Qayta urinib koʻring.',
     best: 'Eng yaxshi',
+    errNetwork: 'Internet aloqasi yoʻq. Oʻzbek tilini tanish uchun internet kerak.',
+    errLanguage: 'Telefoningizdagi nutqni tanish xizmati oʻzbek tilini qoʻllamaydi. Google ilovasini yangilang.',
+    errNoSpeech: 'Ovoz eshitilmadi. Telefonni yaqinroq tuting va balandroq oʻqing.',
+    errOther: 'Nutqni tanishda xatolik. Qayta urinib koʻring.',
+    stReady: '🎙️ Mikrofon tayyor — oʻqishni boshlang',
+    stSpeech: '🔊 Eshityapman…',
+    stProcessing: '⏳ Tahlil qilinmoqda…',
   },
   ru: {
     chooseLang: 'Выберите язык',
@@ -88,6 +102,13 @@ export const STRINGS: Record<Lang, Strings> = {
     errUnavailable: 'Распознавание речи недоступно (установите приложение Google).',
     errStart: 'Не удалось начать запись. Попробуйте ещё раз.',
     best: 'Лучший',
+    errNetwork: 'Нет интернета. Для распознавания речи нужен интернет.',
+    errLanguage: 'Служба распознавания на телефоне не поддерживает этот язык. Обновите приложение Google.',
+    errNoSpeech: 'Голос не слышен. Держите телефон ближе и читайте громче.',
+    errOther: 'Ошибка распознавания речи. Попробуйте ещё раз.',
+    stReady: '🎙️ Микрофон готов — начинайте читать',
+    stSpeech: '🔊 Слышу вас…',
+    stProcessing: '⏳ Обработка…',
   },
   en: {
     chooseLang: 'Choose a language',
@@ -116,5 +137,12 @@ export const STRINGS: Record<Lang, Strings> = {
     errUnavailable: 'Speech recognition is not available on this device (install the Google app).',
     errStart: 'Could not start listening. Please try again.',
     best: 'Best',
+    errNetwork: 'No internet connection. Speech recognition needs internet.',
+    errLanguage: "This phone's speech service doesn't support this language. Update the Google app.",
+    errNoSpeech: 'No voice heard. Hold the phone closer and read louder.',
+    errOther: 'Speech recognition error. Please try again.',
+    stReady: '🎙️ Microphone ready — start reading',
+    stSpeech: '🔊 Hearing you…',
+    stProcessing: '⏳ Processing…',
   },
 };

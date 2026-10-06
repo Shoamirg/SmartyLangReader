@@ -23,7 +23,7 @@ const STATUS_CLASS: Record<WordStatus, string> = {
 export function Reader({ lang, text, best, onBack, onNext, onFinish }: ReaderProps) {
   const s = STRINGS[lang];
   const locale = LANGS.find((l) => l.code === lang)!.locale;
-  const { transcript, listening, error, start, stop } = useRecognizer(locale);
+  const { transcript, listening, state, error, start, stop } = useRecognizer(locale);
 
   const words = useMemo(() => tokenize(text.text), [text.text]);
   const spoken = useMemo(() => tokenize(transcript), [transcript]);
@@ -52,11 +52,21 @@ export function Reader({ lang, text, best, onBack, onNext, onFinish }: ReaderPro
     }
   }, [listening, finished, stats.accuracy, onFinish]);
 
-  const errorText =
-    error === 'no-permission' ? s.errNoPermission
-    : error === 'unavailable' ? s.errUnavailable
-    : error === 'start-failed' ? s.errStart
-    : null;
+  const ERROR_TEXT = {
+    'no-permission': s.errNoPermission,
+    unavailable: s.errUnavailable,
+    'start-failed': s.errStart,
+    network: s.errNetwork,
+    language: s.errLanguage,
+    'no-speech': s.errNoSpeech,
+    other: s.errOther,
+  } as const;
+  const errorText = error ? ERROR_TEXT[error.kind] : null;
+  const statusText =
+    state === 'speech' ? s.stSpeech
+    : state === 'processing' ? s.stProcessing
+    : state === 'ready' ? s.stReady
+    : s.listening;
 
   return (
     <div className="screen reader">
@@ -88,12 +98,17 @@ export function Reader({ lang, text, best, onBack, onNext, onFinish }: ReaderPro
       </article>
 
       {transcript && <p className="heard">“{transcript}”</p>}
-      {errorText && <p className="error">{errorText}</p>}
+      {errorText && (
+        <p className="error">
+          {errorText}
+          {error?.detail && <small> [{error.detail}]</small>}
+        </p>
+      )}
 
       <footer className="actions">
         {listening ? (
           <>
-            <p className="hint pulse">{s.listening}</p>
+            <p className="hint pulse">{statusText}</p>
             <button className="mic stop" onClick={stop}>■ {s.stop}</button>
           </>
         ) : finished ? (
