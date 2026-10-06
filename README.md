@@ -4,7 +4,7 @@ A small Android app built on SmartyLang's read-aloud logic. Pick Uzbek, Russian 
 
 - 500 texts per language (5 levels × 100), taken from the SmartyLang repo and bundled in the APK.
 - Scoring: `src/lib/scoring.ts` is a port of SmartyLang's `alignWords`. Uzbek apostrophes (oʻ / o') and Russian ё/е are treated as the same letter.
-- Speech: Android's built-in recognizer, through `@capacitor-community/speech-recognition`. The Google app must be installed. It needs internet for Uzbek on most phones.
+- Speech: Android's built-in recognizer, through the app's own native plugin (`android/app/src/main/java/uz/smartylang/reader/ReadAloudPlugin.java`). It restarts after each pause and reports every error. The Google app must be installed. It needs internet for Uzbek on most phones.
 
 ## Build
 ```
