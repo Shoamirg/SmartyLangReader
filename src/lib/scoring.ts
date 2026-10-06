@@ -165,3 +165,36 @@ export function computeStats(statuses: WordStatus[]): ReadStats {
     coverage: statuses.length ? Math.round((attempted / statuses.length) * 100) : 0,
   };
 }
+
+/** Reading progress: locked word statuses plus the index of the next unread word. */
+export interface Progress {
+  statuses: WordStatus[];
+  cursor: number;
+}
+
+export function emptyProgress(wordCount: number): Progress {
+  return { statuses: new Array(wordCount).fill('pending'), cursor: 0 };
+}
+
+/**
+ * Apply one spoken utterance starting at the reader's current position.
+ * Words already marked are never re-aligned, so progress only moves forward.
+ * An utterance that matches nothing (noise, cough, off-text talk) is ignored
+ * instead of being counted as mistakes.
+ */
+export function applyUtterance(
+  progress: Progress,
+  sourceWords: string[],
+  spokenWords: string[],
+  lang: Lang,
+): Progress {
+  if (spokenWords.length === 0 || progress.cursor >= sourceWords.length) return progress;
+  const seg = alignWords(sourceWords.slice(progress.cursor), spokenWords, lang);
+  if (!seg.some((s) => s === 'correct' || s === 'slight_mistake')) return progress;
+
+  let last = -1;
+  seg.forEach((s, i) => { if (s !== 'pending') last = i; });
+  const statuses = progress.statuses.slice();
+  for (let i = 0; i <= last; i++) statuses[progress.cursor + i] = seg[i];
+  return { statuses, cursor: progress.cursor + last + 1 };
+}

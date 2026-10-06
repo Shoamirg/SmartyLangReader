@@ -2,74 +2,51 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
 
 /**
- * Continuous read-aloud recognizer.
+ * Read-aloud recognizer.
  *
- * On Android it uses the app's own ReadAloud native plugin
- * (android/.../ReadAloudPlugin.java), which restarts the system recognizer after
- * every pause and reports every state/error. In a desktop browser it falls back
- * to webkitSpeechRecognition so the UI can be tried without a phone.
+ * Android: the app's own ReadAloud plugin (android/.../ReadAloudPlugin.java),
+ * which runs Vosk fully offline with uz/ru/en models bundled in the APK.
+ * Desktop browser: webkitSpeechRecognition fallback so the UI can be tried.
+ *
+ * The hook reports the utterance currently being spoken (`partial`) and calls
+ * `onUtterance` once per finished utterance; the reader advances from there.
  */
 
 interface ReadAloudPlugin {
-  status(): Promise<{ available: boolean; permission: boolean }>;
   start(opts: { language: string }): Promise<void>;
   stop(): Promise<void>;
   addListener(event: 'partial' | 'final', cb: (d: { text: string }) => void): Promise<PluginListenerHandle>;
   addListener(event: 'state', cb: (d: { state: RecognizerState }) => void): Promise<PluginListenerHandle>;
-  addListener(
-    event: 'error',
-    cb: (d: { code: number; message: string; fatal: boolean }) => void,
-  ): Promise<PluginListenerHandle>;
+  addListener(event: 'error', cb: (d: { message: string }) => void): Promise<PluginListenerHandle>;
 }
 
 const ReadAloud = registerPlugin<ReadAloudPlugin>('ReadAloud');
 
-export type RecognizerState = 'idle' | 'listening' | 'ready' | 'speech' | 'processing' | 'stopped';
-export type RecognizerError =
-  | 'no-permission'
-  | 'unavailable'
-  | 'start-failed'
-  | 'network'
-  | 'language'
-  | 'no-speech'
-  | 'other';
+export type RecognizerState = 'idle' | 'loading' | 'listening' | 'stopped';
+export type RecognizerError = 'no-permission' | 'unavailable' | 'start-failed' | 'other';
 
 export interface RecognizerProblem {
   kind: RecognizerError;
-  /** Raw Android error name/code, shown small for troubleshooting. */
   detail?: string;
 }
 
-function classify(code: number, message: string): RecognizerError {
-  if (code === 9 || message === 'permission') return 'no-permission';
-  if (code === 2 || code === 1 || code === 11 || code === 4) return 'network';
-  if (code === 12 || code === 13) return 'language';
-  if (code === 6 || code === 7) return 'no-speech';
-  return 'other';
-}
-
-export function useRecognizer(locale: string) {
-  const [transcript, setTranscript] = useState('');
+export function useRecognizer(locale: string, onUtterance: (text: string) => void) {
+  const [partial, setPartial] = useState('');
   const [listening, setListening] = useState(false);
   const [state, setState] = useState<RecognizerState>('idle');
   const [error, setError] = useState<RecognizerProblem | null>(null);
 
-  const committedRef = useRef('');
-  const currentRef = useRef('');
+  const onUtteranceRef = useRef(onUtterance);
+  onUtteranceRef.current = onUtterance;
   const handles = useRef<PluginListenerHandle[]>([]);
   const webRec = useRef<any>(null);
   const activeRef = useRef(false);
   const isNative = Capacitor.isNativePlatform();
 
-  const publish = useCallback(() => {
-    setTranscript(`${committedRef.current} ${currentRef.current}`.trim());
+  const finishUtterance = useCallback((text: string) => {
+    setPartial('');
+    if (text.trim()) onUtteranceRef.current(text.trim());
   }, []);
-
-  const commit = useCallback((text: string) => {
-    if (text) committedRef.current = `${committedRef.current} ${text}`.trim();
-    currentRef.current = '';
-    publish();
-  }, [publish]);
 
   const removeHandles = () => {
     handles.current.forEach((h) => h.remove());
@@ -79,39 +56,28 @@ export function useRecognizer(locale: string) {
   const startNative = useCallback(async () => {
     removeHandles();
     handles.current = [
-      await ReadAloud.addListener('partial', ({ text }) => {
-        currentRef.current = text;
-        setError(null);
-        publish();
-      }),
-      await ReadAloud.addListener('final', ({ text }) => commit(text || currentRef.current)),
+      await ReadAloud.addListener('partial', ({ text }) => setPartial(text)),
+      await ReadAloud.addListener('final', ({ text }) => finishUtterance(text)),
       await ReadAloud.addListener('state', ({ state: st }) => {
         setState(st);
         if (st === 'stopped') {
-          commit(currentRef.current);
           activeRef.current = false;
           setListening(false);
+          setPartial('');
+          removeHandles();
         }
       }),
-      await ReadAloud.addListener('error', ({ code, message, fatal }) => {
-        const kind = classify(code, message);
-        // Soft "heard nothing" errors are normal between sentences; only show fatal ones.
-        if (fatal) setError({ kind, detail: `${message} (${code})` });
-      }),
+      await ReadAloud.addListener('error', ({ message }) => setError({ kind: 'other', detail: message })),
     ];
     try {
       await ReadAloud.start({ language: locale });
       return true;
     } catch (e: any) {
-      const code = e?.code;
-      setError({
-        kind: code === 'no-permission' ? 'no-permission' : code === 'unavailable' ? 'unavailable' : 'start-failed',
-        detail: e?.message,
-      });
+      setError({ kind: e?.code === 'no-permission' ? 'no-permission' : 'start-failed', detail: e?.message });
       removeHandles();
       return false;
     }
-  }, [locale, publish, commit]);
+  }, [locale, finishUtterance]);
 
   const startWeb = useCallback(() => {
     const Ctor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -127,19 +93,16 @@ export function useRecognizer(locale: string) {
       let interim = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const res = event.results[i];
-        if (res.isFinal) committedRef.current = `${committedRef.current} ${res[0].transcript}`.trim();
+        if (res.isFinal) finishUtterance(res[0].transcript);
         else interim += ` ${res[0].transcript}`;
       }
-      currentRef.current = interim.trim();
-      publish();
+      setPartial(interim.trim());
     };
     rec.onerror = (e: any) => {
       if (e.error === 'not-allowed') setError({ kind: 'no-permission' });
-      else if (e.error === 'network') setError({ kind: 'network' });
     };
     rec.onend = () => {
       if (activeRef.current) {
-        commit(currentRef.current);
         try { rec.start(); } catch { /* already started */ }
       }
     };
@@ -147,14 +110,13 @@ export function useRecognizer(locale: string) {
     rec.start();
     setState('listening');
     return true;
-  }, [locale, publish, commit]);
+  }, [locale, finishUtterance]);
 
   const start = useCallback(async () => {
     setError(null);
-    committedRef.current = '';
-    currentRef.current = '';
-    setTranscript('');
+    setPartial('');
     activeRef.current = true;
+    setListening(true);
     const ok = isNative ? await startNative() : startWeb();
     activeRef.current = ok;
     setListening(ok);
@@ -165,30 +127,21 @@ export function useRecognizer(locale: string) {
     activeRef.current = false;
     setListening(false);
     if (isNative) {
+      // Native flushes the last utterance as "final", then emits "stopped".
       try { await ReadAloud.stop(); } catch { /* not running */ }
-      // The last utterance's final result arrives shortly after stop().
-      window.setTimeout(() => {
-        commit(currentRef.current);
-        removeHandles();
-        setState('idle');
-      }, 1200);
     } else {
       try { webRec.current?.stop(); } catch { /* already stopped */ }
       webRec.current = null;
-      commit(currentRef.current);
+      setPartial('');
       setState('idle');
-    }
-  }, [isNative, commit]);
-
-  useEffect(() => () => {
-    activeRef.current = false;
-    if (isNative) {
-      ReadAloud.stop().catch(() => undefined);
-      removeHandles();
-    } else {
-      webRec.current?.abort?.();
     }
   }, [isNative]);
 
-  return { transcript, listening, state, error, start, stop };
+  useEffect(() => () => {
+    activeRef.current = false;
+    if (isNative) ReadAloud.stop().catch(() => undefined);
+    else webRec.current?.abort?.();
+  }, [isNative]);
+
+  return { partial, listening, state, error, start, stop };
 }

@@ -4,9 +4,17 @@ A small Android app built on SmartyLang's read-aloud logic. Pick Uzbek, Russian 
 
 - 500 texts per language (5 levels × 100), taken from the SmartyLang repo and bundled in the APK.
 - Scoring: `src/lib/scoring.ts` is a port of SmartyLang's `alignWords`. Uzbek apostrophes (oʻ / o') and Russian ё/е are treated as the same letter.
-- Speech: Android's built-in recognizer, through the app's own native plugin (`android/app/src/main/java/uz/smartylang/reader/ReadAloudPlugin.java`). It restarts after each pause and reports every error. The Google app must be installed. It needs internet for Uzbek on most phones.
+- Speech: fully offline. It uses Vosk with small uz/ru/en models bundled in the APK, through the app's own native plugin (`android/app/src/main/java/uz/smartylang/reader/ReadAloudPlugin.java`). The app has no internet permission. Models unpack to internal storage the first time each language is used.
+- Progress only moves forward. Each spoken sentence is matched from the reader's current position, and marked words are locked (`applyUtterance` in `scoring.ts`).
 
 ## Build
+The speech models are not in git (about 260 MB). Download them once:
+```
+# into .models/assets/vosk/{uz,ru,en}
+https://alphacephei.com/vosk/models/vosk-model-small-uz-0.22.zip     -> .models/assets/vosk/uz
+https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip     -> .models/assets/vosk/ru
+https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip  -> .models/assets/vosk/en
+```
 ```
 npm install
 npm test                      # scoring tests

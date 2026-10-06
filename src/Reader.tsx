@@ -1,5 +1,12 @@
-import { useEffect, useMemo, useRef } from 'react';
-import { alignWords, computeStats, tokenize, type Lang, type WordStatus } from './lib/scoring';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  applyUtterance,
+  computeStats,
+  emptyProgress,
+  tokenize,
+  type Lang,
+  type WordStatus,
+} from './lib/scoring';
 import { LANGS, STRINGS } from './lib/i18n';
 import type { ReadingText } from './lib/texts';
 import { useRecognizer } from './lib/useRecognizer';
@@ -20,18 +27,37 @@ const STATUS_CLASS: Record<WordStatus, string> = {
   pending: '',
 };
 
+const HEARD_LINES = 3;
+
 export function Reader({ lang, text, best, onBack, onNext, onFinish }: ReaderProps) {
   const s = STRINGS[lang];
   const locale = LANGS.find((l) => l.code === lang)!.locale;
-  const { transcript, listening, state, error, start, stop } = useRecognizer(locale);
-
   const words = useMemo(() => tokenize(text.text), [text.text]);
-  const spoken = useMemo(() => tokenize(transcript), [transcript]);
-  const statuses = useMemo(() => alignWords(words, spoken, lang), [words, spoken, lang]);
-  const stats = useMemo(() => computeStats(statuses), [statuses]);
-  const finished = !listening && stats.attempted > 0;
 
-  const activeIndex = listening ? statuses.indexOf('pending') : -1;
+  // Locked progress: once a word is marked it never goes back to unread.
+  const [progress, setProgress] = useState(() => emptyProgress(words.length));
+  const [heard, setHeard] = useState<string[]>([]);
+
+  const handleUtterance = useCallback(
+    (utterance: string) => {
+      setProgress((p) => applyUtterance(p, words, tokenize(utterance), lang));
+      setHeard((h) => [...h, utterance].slice(-HEARD_LINES));
+    },
+    [words, lang],
+  );
+
+  const { partial, listening, state, error, start, stop } = useRecognizer(locale, handleUtterance);
+
+  // Live preview of the sentence being spoken, on top of the locked progress.
+  const view = useMemo(
+    () => applyUtterance(progress, words, tokenize(partial), lang),
+    [progress, words, partial, lang],
+  );
+  const stats = useMemo(() => computeStats(progress.statuses), [progress]);
+  const liveStats = useMemo(() => computeStats(view.statuses), [view]);
+  const finished = !listening && state !== 'loading' && progress.cursor > 0;
+
+  const activeIndex = listening && view.cursor < words.length ? view.cursor : -1;
   const activeRef = useRef<HTMLSpanElement>(null);
   const reportedRef = useRef(false);
 
@@ -39,10 +65,10 @@ export function Reader({ lang, text, best, onBack, onNext, onFinish }: ReaderPro
     activeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [activeIndex]);
 
-  // Every word reached → stop automatically, like SmartyLang.
+  // Reached the last word → stop automatically.
   useEffect(() => {
-    if (listening && words.length > 0 && !statuses.includes('pending')) stop();
-  }, [listening, statuses, words.length, stop]);
+    if (listening && progress.cursor >= words.length) stop();
+  }, [listening, progress.cursor, words.length, stop]);
 
   useEffect(() => {
     if (listening) reportedRef.current = false;
@@ -52,21 +78,21 @@ export function Reader({ lang, text, best, onBack, onNext, onFinish }: ReaderPro
     }
   }, [listening, finished, stats.accuracy, onFinish]);
 
+  const restart = () => {
+    setProgress(emptyProgress(words.length));
+    setHeard([]);
+    start();
+  };
+
   const ERROR_TEXT = {
     'no-permission': s.errNoPermission,
     unavailable: s.errUnavailable,
     'start-failed': s.errStart,
-    network: s.errNetwork,
-    language: s.errLanguage,
-    'no-speech': s.errNoSpeech,
     other: s.errOther,
   } as const;
   const errorText = error ? ERROR_TEXT[error.kind] : null;
-  const statusText =
-    state === 'speech' ? s.stSpeech
-    : state === 'processing' ? s.stProcessing
-    : state === 'ready' ? s.stReady
-    : s.listening;
+  const statusText = state === 'loading' ? s.stLoading : s.listening;
+  const shown = listening ? liveStats : stats;
 
   return (
     <div className="screen reader">
@@ -78,11 +104,11 @@ export function Reader({ lang, text, best, onBack, onNext, onFinish }: ReaderPro
       <h1 className="title">{text.title}</h1>
 
       <div className="stats">
-        <div><b>{stats.accuracy}%</b><span>{s.accuracy}</span></div>
-        <div><b>{stats.coverage}%</b><span>{s.read}</span></div>
-        <div className="ok"><b>{stats.correct}</b><span>{s.correct}</span></div>
-        <div className="close"><b>{stats.slight}</b><span>{s.close}</span></div>
-        <div className="bad"><b>{stats.wrong}</b><span>{s.wrong}</span></div>
+        <div><b>{shown.accuracy}%</b><span>{s.accuracy}</span></div>
+        <div><b>{shown.coverage}%</b><span>{s.read}</span></div>
+        <div className="ok"><b>{shown.correct}</b><span>{s.correct}</span></div>
+        <div className="close"><b>{shown.slight}</b><span>{s.close}</span></div>
+        <div className="bad"><b>{shown.wrong}</b><span>{s.wrong}</span></div>
       </div>
 
       <article className="passage" lang={lang}>
@@ -90,14 +116,18 @@ export function Reader({ lang, text, best, onBack, onNext, onFinish }: ReaderPro
           <span
             key={i}
             ref={i === activeIndex ? activeRef : undefined}
-            className={`w ${STATUS_CLASS[statuses[i]]} ${i === activeIndex ? 'w-active' : ''}`}
+            className={`w ${STATUS_CLASS[view.statuses[i]]} ${i === activeIndex ? 'w-active' : ''}`}
           >
             {w}{' '}
           </span>
         ))}
       </article>
 
-      {transcript && <p className="heard">“{transcript}”</p>}
+      {(heard.length > 0 || partial) && (
+        <p className="heard">
+          {[...heard, partial].filter(Boolean).join(' · ')}
+        </p>
+      )}
       {errorText && (
         <p className="error">
           {errorText}
@@ -113,7 +143,10 @@ export function Reader({ lang, text, best, onBack, onNext, onFinish }: ReaderPro
           </>
         ) : finished ? (
           <div className="row">
-            <button className="secondary" onClick={start}>↻ {s.retry}</button>
+            {progress.cursor < words.length && (
+              <button className="secondary" onClick={start}>▶ {s.resume}</button>
+            )}
+            <button className="secondary" onClick={restart}>↻ {s.retry}</button>
             {onNext && <button className="primary" onClick={onNext}>{s.next} ›</button>}
           </div>
         ) : (

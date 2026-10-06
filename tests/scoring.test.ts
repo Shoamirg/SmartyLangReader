@@ -41,3 +41,30 @@ test('skipped word is marked wrong and reading resyncs', () => {
   const s = alignWords(tokenize('I drink hot tea every day'), tokenize('I drink tea every day'), 'en');
   assert.deepEqual(s, ['correct', 'correct', 'incorrect', 'correct', 'correct', 'correct']);
 });
+
+import { applyUtterance, emptyProgress } from '../src/lib/scoring.ts';
+
+const words = tokenize('Every morning I wake up early. I wash my face with cold water.');
+
+test('progress continues from where the reader stopped (never back to the start)', () => {
+  let p = emptyProgress(words.length);
+  p = applyUtterance(p, words, tokenize('every morning I wake up early'), 'en');
+  assert.equal(p.cursor, 6);
+  // Second utterance must not be matched against the beginning of the passage.
+  p = applyUtterance(p, words, tokenize('I wash my face'), 'en');
+  assert.equal(p.cursor, 10);
+  assert.ok(p.statuses.slice(0, 10).every((s) => s === 'correct'));
+});
+
+test('noise utterance is ignored, not counted as mistakes', () => {
+  const p0 = applyUtterance(emptyProgress(words.length), words, tokenize('every morning'), 'en');
+  const p1 = applyUtterance(p0, words, tokenize('hmm okay'), 'en');
+  assert.deepEqual(p1, p0);
+});
+
+test('locked words never change when a later utterance repeats them', () => {
+  let p = applyUtterance(emptyProgress(words.length), words, tokenize('every morning I wake up early'), 'en');
+  const before = p.statuses.slice(0, 6);
+  p = applyUtterance(p, words, tokenize('I wash'), 'en');
+  assert.deepEqual(p.statuses.slice(0, 6), before);
+});
